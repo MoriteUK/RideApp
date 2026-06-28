@@ -293,8 +293,10 @@ async function getToken() {
     const r = await msalApp.acquireTokenSilent({ scopes: SCOPES, account: accounts[0] });
     return r.accessToken;
   } catch {
-    msalApp.acquireTokenRedirect({ scopes: SCOPES });
-    return null;
+    try {
+      const r = await msalApp.acquireTokenPopup({ scopes: SCOPES });
+      return r.accessToken;
+    } catch { return null; }
   }
 }
 
@@ -552,8 +554,13 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
 // ── Sign out ──────────────────────────────────────────────────────
 document.getElementById('signout-btn').addEventListener('click', async () => {
+  localStorage.removeItem('myride_data');
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('signin').style.display = 'flex';
   const accounts = msalApp.getAllAccounts();
-  if (accounts.length) await msalApp.logoutRedirect({ account: accounts[0] });
+  if (accounts.length) {
+    try { await msalApp.logoutPopup({ account: accounts[0] }); } catch {}
+  }
 });
 
 // ── Log ride ──────────────────────────────────────────────────────
@@ -602,46 +609,40 @@ document.getElementById('log-weight-btn').addEventListener('click', async () => 
   if (appData) renderHome();
 });
 
-// ── Sign in ────────────────────────────────────────────────────────
-document.getElementById('signin-btn').addEventListener('click', () => {
-  msalApp.loginRedirect({ scopes: SCOPES });
+// ── Sign in ─────────────────────────────────────────────────────────
+// Uses popup (not redirect) so auth works reliably in PWA standalone mode on Android.
+// Redirect flow hangs when the Microsoft auth page returns to a different browser context.
+document.getElementById('signin-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('signin-btn');
+  const errEl = document.getElementById('signin-error');
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  errEl.textContent = '';
+  try {
+    await msalApp.loginPopup({ scopes: SCOPES });
+    document.getElementById('signin').style.display = 'none';
+    document.getElementById('loading').style.display = 'flex';
+    await renderApp();
+  } catch (e) {
+    errEl.textContent = 'Sign-in failed: ' + (e.message || String(e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in with Microsoft';
+  }
 });
 
-// ── Init ───────────────────────────────────────────────────────────
-async function init() {
-  let redirectResult = null;
-  try {
-    redirectResult = await msalApp.handleRedirectPromise();
-  } catch (e) {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('signin').style.display = 'flex';
-    document.getElementById('signin-error').textContent = 'Auth error: ' + e.message;
-    return;
-  }
-
-  const accounts = msalApp.getAllAccounts();
-  const isAuthed = redirectResult || accounts.length > 0;
-
-  document.getElementById('loading').style.display = 'none';
-
-  if (!isAuthed) {
-    document.getElementById('signin').style.display = 'flex';
-    return;
-  }
-
+// ── After auth: set up and load data ────────────────────────────────
+async function renderApp() {
   const today = todayISO();
   document.getElementById('log-date').value = today;
   document.getElementById('weight-date').value = today;
-
+  document.getElementById('loading').style.display = 'none';
   document.getElementById('app').classList.add('visible');
   setSyncStatus('Loading…');
-
-  // Show cached data immediately while fetching fresh
   const cached = localStorage.getItem('myride_data');
   if (cached) {
     try { appData = JSON.parse(cached); renderHome(); } catch {}
   }
-
   const fresh = await loadFromOneDrive();
   if (fresh) {
     appData = fresh;
@@ -652,6 +653,26 @@ async function init() {
   } else if (!cached) {
     setSyncStatus('No data — check OneDrive sync on desktop first');
   }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────
+async function init() {
+  // Race with a 3s timeout: handleRedirectPromise can hang indefinitely in PWA
+  // standalone mode when the Microsoft redirect was handled in a different context
+  try {
+    const timeout = new Promise(resolve => setTimeout(() => resolve(null), 3000));
+    await Promise.race([msalApp.handleRedirectPromise(), timeout]);
+  } catch {}
+
+  const accounts = msalApp.getAllAccounts();
+  document.getElementById('loading').style.display = 'none';
+
+  if (!accounts.length) {
+    document.getElementById('signin').style.display = 'flex';
+    return;
+  }
+
+  await renderApp();
 }
 
 init().catch(e => {
