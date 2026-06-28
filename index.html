@@ -243,7 +243,10 @@ html, body { height: 100%; background: var(--paper); color: var(--ink); font-fam
 <script>
 // ── Config ──────────────────────────────────────────────────────
 const CLIENT_ID     = '726ecfd2-1b76-499b-9ef4-3dbd26a18097';
-const REDIRECT_URI  = window.location.origin + window.location.pathname;
+// In the Capacitor native app the WebView origin is https://localhost — registered in Azure.
+// In the browser (GitHub Pages) use the actual page URL.
+const isNative      = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const REDIRECT_URI  = isNative ? 'https://localhost/' : (window.location.origin + window.location.pathname);
 const ONEDRIVE_FILE = '%23Personal/Cycling/myride-data.json';
 const SCOPES        = ['Files.ReadWrite'];
 
@@ -293,6 +296,8 @@ async function getToken() {
     const r = await msalApp.acquireTokenSilent({ scopes: SCOPES, account: accounts[0] });
     return r.accessToken;
   } catch {
+    // Native WebView: redirect back to https://localhost/ after token refresh
+    if (isNative) { msalApp.acquireTokenRedirect({ scopes: SCOPES }); return null; }
     try {
       const r = await msalApp.acquireTokenPopup({ scopes: SCOPES });
       return r.accessToken;
@@ -555,11 +560,19 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 // ── Sign out ──────────────────────────────────────────────────────
 document.getElementById('signout-btn').addEventListener('click', async () => {
   localStorage.removeItem('myride_data');
-  document.getElementById('app').classList.remove('visible');
-  document.getElementById('signin').style.display = 'flex';
   const accounts = msalApp.getAllAccounts();
   if (accounts.length) {
-    try { await msalApp.logoutPopup({ account: accounts[0] }); } catch {}
+    if (isNative) {
+      // Redirect navigates WebView to MS logout page, then back to https://localhost/
+      await msalApp.logoutRedirect({ account: accounts[0] });
+    } else {
+      document.getElementById('app').classList.remove('visible');
+      document.getElementById('signin').style.display = 'flex';
+      try { await msalApp.logoutPopup({ account: accounts[0] }); } catch {}
+    }
+  } else {
+    document.getElementById('app').classList.remove('visible');
+    document.getElementById('signin').style.display = 'flex';
   }
 });
 
@@ -610,9 +623,13 @@ document.getElementById('log-weight-btn').addEventListener('click', async () => 
 });
 
 // ── Sign in ─────────────────────────────────────────────────────────
-// Uses popup (not redirect) so auth works reliably in PWA standalone mode on Android.
-// Redirect flow hangs when the Microsoft auth page returns to a different browser context.
 document.getElementById('signin-btn').addEventListener('click', async () => {
+  if (isNative) {
+    // Redirect stays within the Capacitor WebView — no cross-context issues
+    msalApp.loginRedirect({ scopes: SCOPES });
+    return;
+  }
+  // Web/PWA: use popup so auth doesn't leave the browser tab
   const btn = document.getElementById('signin-btn');
   const errEl = document.getElementById('signin-error');
   btn.disabled = true;
