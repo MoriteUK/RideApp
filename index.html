@@ -18,7 +18,7 @@
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://alcdn.msauth.net/browser/3.28.1/js/msal-browser.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <style>
 :root {
   --paper: #F5F0E6;
@@ -571,11 +571,14 @@ document.getElementById('signin-btn').addEventListener('click', () => {
 
 // ── Init ───────────────────────────────────────────────────────────
 async function init() {
-  await msalApp.initialize();
-
   let redirectResult = null;
-  try { redirectResult = await msalApp.handleRedirectPromise(); } catch (e) {
-    document.getElementById('signin-error').textContent = e.message;
+  try {
+    redirectResult = await msalApp.handleRedirectPromise();
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('signin').style.display = 'flex';
+    document.getElementById('signin-error').textContent = 'Auth error: ' + e.message;
+    return;
   }
 
   const accounts = msalApp.getAllAccounts();
@@ -588,7 +591,6 @@ async function init() {
     return;
   }
 
-  // Set today's date in log forms
   const today = todayISO();
   document.getElementById('log-date').value = today;
   document.getElementById('weight-date').value = today;
@@ -596,7 +598,7 @@ async function init() {
   document.getElementById('app').classList.add('visible');
   setSyncStatus('Loading…');
 
-  // Load data from OneDrive
+  // Show cached data immediately while fetching fresh
   const cached = localStorage.getItem('myride_data');
   if (cached) {
     try { appData = JSON.parse(cached); renderHome(); } catch {}
@@ -610,11 +612,15 @@ async function init() {
     const t = fresh._syncedAt ? new Date(fresh._syncedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '?';
     setSyncStatus(`☁ ${t}`);
   } else if (!cached) {
-    setSyncStatus('No data found');
+    setSyncStatus('No data — check OneDrive sync on desktop first');
   }
 }
 
-init();
+init().catch(e => {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('signin').style.display = 'flex';
+  document.getElementById('signin-error').textContent = 'Error: ' + e.message;
+});
 </script>
 </body>
 </html>
