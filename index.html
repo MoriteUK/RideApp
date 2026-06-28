@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#20262E">
+<title>My Ride</title>
+<!--
+  SETUP REQUIRED (one-time):
+  1. Go to portal.azure.com → Azure Active Directory → App registrations
+  2. Find the app "726ecfd2-1b76-499b-9ef4-3dbd26a18097"
+  3. Authentication → Add a platform → Single-page application (SPA)
+  4. Add this file's hosted URL as the redirect URI (e.g. https://yourname.github.io/myride/)
+  5. Under "Supported account types" ensure "Accounts in any organizational directory and personal Microsoft accounts" is selected
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://alcdn.msauth.net/browser/3.28.1/js/msal-browser.min.js"></script>
+<style>
+:root {
+  --paper: #F5F0E6;
+  --ink: #20262E;
+  --red: #C1442D;
+  --teal: #3E6E63;
+  --gold: #C99A3B;
+  --line: #DCD3C2;
+  --muted: #8B8378;
+  --card: #FFFDF8;
+  --font-display: 'Oswald', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --nav-h: 64px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; background: var(--paper); color: var(--ink); font-family: var(--font-body); overflow: hidden; }
+
+/* ── Sign-in screen ── */
+#signin {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; gap: 24px; padding: 32px;
+}
+#signin .logo { width: 64px; height: 64px; }
+#signin .brand-name { font-family: var(--font-display); font-size: 36px; font-weight: 600; letter-spacing: 0.04em; }
+#signin .tagline { font-size: 13px; color: var(--muted); font-family: var(--font-mono); text-align: center; }
+.btn-primary {
+  background: var(--ink); color: var(--paper); border: none; border-radius: 6px;
+  padding: 14px 28px; font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; width: 100%; max-width: 300px;
+}
+.btn-secondary {
+  background: none; color: var(--ink); border: 1.5px solid var(--line); border-radius: 6px;
+  padding: 10px 20px; font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+}
+
+/* ── App shell ── */
+#app { display: none; height: 100vh; flex-direction: column; }
+#app.visible { display: flex; }
+
+/* ── Top bar ── */
+#topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 2px solid var(--ink);
+  background: var(--paper); flex-shrink: 0;
+}
+#topbar .brand { font-family: var(--font-display); font-size: 22px; font-weight: 600; }
+#topbar .sync-status { font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+
+/* ── Panels ── */
+#panels { flex: 1; overflow: hidden; position: relative; }
+.panel { position: absolute; inset: 0; overflow-y: auto; padding: 16px 16px calc(16px + var(--nav-h) + var(--safe-bottom)); display: none; }
+.panel.active { display: block; }
+
+/* ── Bottom nav ── */
+#nav {
+  display: flex; border-top: 1.5px solid var(--line); background: var(--paper);
+  flex-shrink: 0; padding-bottom: var(--safe-bottom);
+}
+.nav-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 10px 4px; border: none; background: none; cursor: pointer; gap: 3px;
+  font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); transition: color 0.15s;
+}
+.nav-btn.active { color: var(--red); }
+.nav-btn svg { width: 22px; height: 22px; }
+
+/* ── Cards ── */
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px 16px; margin-bottom: 12px;
+}
+.eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--red); margin-bottom: 6px; }
+.big-number { font-family: var(--font-display); font-size: 42px; font-weight: 600; line-height: 1; }
+.unit { font-family: var(--font-mono); font-size: 13px; color: var(--muted); margin-left: 4px; }
+.note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.row { display: flex; align-items: baseline; gap: 8px; }
+.divider { height: 1px; background: var(--line); margin: 10px 0; }
+
+/* ── Progress bar ── */
+.progress-wrap { background: var(--line); border-radius: 4px; height: 8px; margin-top: 8px; overflow: hidden; }
+.progress-bar { height: 100%; border-radius: 4px; background: var(--teal); transition: width 0.4s; }
+.progress-bar.over { background: var(--red); }
+
+/* ── Metrics row ── */
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.metric-card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.metric-label { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.metric-value { font-family: var(--font-display); font-size: 26px; font-weight: 600; margin-top: 2px; }
+.metric-unit { font-size: 11px; color: var(--muted); }
+
+/* ── Log form ── */
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.field label { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.field input, .field select, .field textarea {
+  border: 1.5px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  font-family: var(--font-body); font-size: 16px; background: var(--card); color: var(--ink);
+  width: 100%; outline: none;
+}
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--ink); }
+.field textarea { resize: vertical; min-height: 72px; }
+.btn-save {
+  width: 100%; padding: 14px; background: var(--red); color: white; border: none;
+  border-radius: 6px; font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; margin-top: 4px;
+}
+.btn-save:active { opacity: 0.8; }
+.save-status { font-family: var(--font-mono); font-size: 11px; color: var(--teal); margin-top: 8px; text-align: center; min-height: 18px; }
+
+/* ── Plan table ── */
+.plan-week { margin-bottom: 12px; }
+.plan-week-header { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+.plan-week-header.current { color: var(--red); }
+.plan-bars { display: flex; gap: 4px; align-items: flex-end; height: 48px; }
+.plan-day-bar { flex: 1; border-radius: 3px 3px 0 0; background: var(--line); min-height: 4px; transition: height 0.3s; }
+.plan-day-bar.has-ride { background: var(--teal); }
+.plan-day-bar.today { background: var(--red); }
+.plan-day-labels { display: flex; gap: 4px; margin-top: 3px; }
+.plan-day-label { flex: 1; font-family: var(--font-mono); font-size: 8px; text-align: center; color: var(--muted); }
+.plan-day-km { flex: 1; font-family: var(--font-mono); font-size: 8px; text-align: center; color: var(--ink); }
+.plan-week-total { font-family: var(--font-display); font-size: 18px; font-weight: 600; }
+
+/* ── Upcoming event ── */
+.event-card { border-left: 3px solid var(--gold); padding-left: 12px; }
+.event-name { font-family: var(--font-display); font-size: 18px; font-weight: 500; }
+.event-meta { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 4px; }
+.countdown { font-family: var(--font-display); font-size: 28px; font-weight: 600; color: var(--gold); }
+
+/* ── Loading ── */
+#loading { position: fixed; inset: 0; background: var(--paper); display: flex; align-items: center; justify-content: center; z-index: 100; }
+#loading .spinner { width: 32px; height: 32px; border: 3px solid var(--line); border-top-color: var(--red); border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading"><div class="spinner"></div></div>
+
+<!-- Sign in -->
+<div id="signin" style="display:none;">
+  <svg class="logo" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="32" r="30" stroke="#20262E" stroke-width="3"/>
+    <circle cx="32" cy="32" r="8" fill="#C1442D"/>
+    <ellipse cx="32" cy="32" rx="20" ry="5" stroke="#20262E" stroke-width="2" transform="rotate(-30 32 32)"/>
+  </svg>
+  <div class="brand-name">MY RIDE</div>
+  <div class="tagline">Cycling training log</div>
+  <button class="btn-primary" id="signin-btn">Sign in with Microsoft</button>
+  <div id="signin-error" style="font-size:12px;color:#C1442D;text-align:center;"></div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <div id="topbar">
+    <div class="brand">MY RIDE</div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span id="sync-status" class="sync-status"></span>
+      <button class="btn-secondary" id="signout-btn" style="padding:6px 12px;font-size:10px;">Sign out</button>
+    </div>
+  </div>
+
+  <div id="panels">
+    <!-- HOME -->
+    <div class="panel active" id="panel-home">
+      <div id="home-content"><p class="note" style="margin-top:16px;">Loading…</p></div>
+    </div>
+
+    <!-- LOG -->
+    <div class="panel" id="panel-log">
+      <div class="card">
+        <div class="eyebrow">Log a ride</div>
+        <div class="field"><label>Date</label><input type="date" id="log-date"></div>
+        <div class="field"><label>Distance (km)</label><input type="number" id="log-km" placeholder="0.0" step="0.1" min="0" inputmode="decimal"></div>
+        <div class="field"><label>Notes</label><textarea id="log-notes" placeholder="Optional notes…" rows="2"></textarea></div>
+        <button class="btn-save" id="log-ride-btn">Save Ride</button>
+        <div class="save-status" id="log-ride-status"></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Log weight</div>
+        <div class="field"><label>Date</label><input type="date" id="weight-date"></div>
+        <div class="field"><label>Weight (kg)</label><input type="number" id="weight-kg" placeholder="0.0" step="0.1" min="0" inputmode="decimal"></div>
+        <button class="btn-save" id="log-weight-btn">Save Weight</button>
+        <div class="save-status" id="log-weight-status"></div>
+      </div>
+    </div>
+
+    <!-- PLAN -->
+    <div class="panel" id="panel-plan">
+      <div id="plan-content"><p class="note" style="margin-top:16px;">Loading…</p></div>
+    </div>
+  </div>
+
+  <nav id="nav">
+    <button class="nav-btn active" data-panel="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Home
+    </button>
+    <button class="nav-btn" data-panel="log">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      Log
+    </button>
+    <button class="nav-btn" data-panel="plan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Plan
+    </button>
+  </nav>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────
+const CLIENT_ID     = '726ecfd2-1b76-499b-9ef4-3dbd26a18097';
+const REDIRECT_URI  = window.location.origin + window.location.pathname;
+const ONEDRIVE_FILE = '%23Personal/Cycling/myride-data.json';
+const SCOPES        = ['Files.ReadWrite'];
+
+// ── MSAL ────────────────────────────────────────────────────────
+const msal_config = {
+  auth: { clientId: CLIENT_ID, authority: 'https://login.microsoftonline.com/common', redirectUri: REDIRECT_URI },
+  cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true },
+};
+const msalApp = new msal.PublicClientApplication(msal_config);
+
+// ── State ────────────────────────────────────────────────────────
+let appData = null;       // full data object from OneDrive
+let saveTimer = null;
+
+// ── Helpers ──────────────────────────────────────────────────────
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+function weekStartISO(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function addDays(iso, n) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function fmtDate(iso) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function daysBetween(from, to) {
+  return Math.round((new Date(to + 'T00:00:00') - new Date(from + 'T00:00:00')) / 86400000);
+}
+
+function showEl(id, show = true) { document.getElementById(id).style.display = show ? '' : 'none'; }
+
+// ── Auth ─────────────────────────────────────────────────────────
+async function getToken() {
+  const accounts = msalApp.getAllAccounts();
+  if (!accounts.length) return null;
+  try {
+    const r = await msalApp.acquireTokenSilent({ scopes: SCOPES, account: accounts[0] });
+    return r.accessToken;
+  } catch {
+    msalApp.acquireTokenRedirect({ scopes: SCOPES });
+    return null;
+  }
+}
+
+// ── OneDrive ─────────────────────────────────────────────────────
+async function loadFromOneDrive() {
+  const token = await getToken();
+  if (!token) return null;
+  try {
+    const url = `https://graph.microsoft.com/v1.0/me/drive/root:/${ONEDRIVE_FILE}:/content`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status === 404) return {};
+    if (!res.ok) return null;
+    return res.json();
+  } catch { return null; }
+}
+
+async function saveToOneDrive(data) {
+  const token = await getToken();
+  if (!token) return false;
+  setSyncStatus('☁ saving…');
+  try {
+    const url = `https://graph.microsoft.com/v1.0/me/drive/root:/${ONEDRIVE_FILE}:/content`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, _syncedAt: new Date().toISOString() }),
+    });
+    if (res.ok) {
+      const t = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      setSyncStatus(`☁ ${t}`);
+      return true;
+    }
+    setSyncStatus('☁ failed');
+    return false;
+  } catch { setSyncStatus('☁ failed'); return false; }
+}
+
+function schedSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveToOneDrive(appData), 5000);
+}
+
+function setSyncStatus(text) {
+  const el = document.getElementById('sync-status');
+  if (el) el.textContent = text;
+}
+
+// ── Render: Home ─────────────────────────────────────────────────
+function renderHome() {
+  const today = todayISO();
+  const ws = weekStartISO(today);
+  const entries = appData.entries || [];
+  const planRows = appData.planRows || [];
+  const milestones = appData.milestones || [];
+
+  // Week mileage
+  const weekEntries = entries.filter(e => e.date >= ws && e.date <= addDays(ws, 6));
+  const weekKm = weekEntries.reduce((s, e) => s + (e.distanceKm || 0), 0);
+  const planRow = planRows.find(r => r.weekStart === ws) || planRows.find(r => r.weekStart <= ws && addDays(r.weekStart, 6) >= ws);
+  const weekTarget = planRow ? (Number(planRow.targetVol) || 0) : 0;
+  const pct = weekTarget > 0 ? Math.min(weekKm / weekTarget, 1) : 0;
+
+  // Today's entry
+  const todayEntry = entries.find(e => e.date === today);
+  const todayKm = todayEntry?.distanceKm || 0;
+
+  // Latest weight (last 7 days)
+  const recentWeights = entries.filter(e => e.weightKg && e.date <= today && e.date >= addDays(today, -14)).sort((a, b) => b.date.localeCompare(a.date));
+  const latestWeight = recentWeights[0]?.weightKg;
+
+  // Garmin body comp (latest)
+  const garminData = appData.garminBodyData || {};
+  const garminDates = Object.keys(garminData).sort().reverse();
+  const latestFatDate = garminDates.find(d => garminData[d].bodyFat != null);
+  const latestFat = latestFatDate ? garminData[latestFatDate].bodyFat : null;
+
+  // Next milestone
+  const upcoming = milestones.filter(m => m.date > today).sort((a, b) => a.date.localeCompare(b.date));
+  const nextEvent = upcoming[0];
+
+  // Today's plan focus
+  const dayOfWeek = new Date(today + 'T00:00:00').getDay(); // 0=Sun
+  let todayFocus = 'Rest day';
+  let todayFocusNote = '';
+  if (planRow && !planRow.isHoliday) {
+    const vol = Number(planRow.targetVol) || 0;
+    const long = Number(planRow.targetLong) || 0;
+    if (dayOfWeek === 6) { // Sat
+      const satKm = Number(planRow.targetSat) || 0;
+      if (satKm > 0) { todayFocus = 'Outdoor ride'; todayFocusNote = `~${satKm} km`; }
+    } else if (dayOfWeek === 0) { // Sun
+      if (long > 0) { todayFocus = long >= 200 ? 'Audax / long ride' : 'Long ride'; todayFocusNote = `${long} km`; }
+    } else if ([2, 4].includes(dayOfWeek)) { // Tue, Thu
+      if (vol > 0) { const d = Math.round((vol - (Number(planRow.targetSat)||0) - long) / 4); todayFocus = 'Zwift session'; todayFocusNote = d > 0 ? `~${d} km` : ''; }
+    }
+    if (planRow.audax) todayFocusNote = planRow.audax;
+  }
+
+  // All-time km
+  const allKm = entries.reduce((s, e) => s + (e.distanceKm || 0), 0);
+  const yearKm = entries.filter(e => e.date >= today.slice(0, 4) + '-01-01').reduce((s, e) => s + (e.distanceKm || 0), 0);
+
+  let html = '';
+
+  // Today card
+  html += `<div class="card">
+    <div class="eyebrow">${new Date(today + 'T00:00:00').toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' })}</div>
+    <div class="row">
+      <div class="big-number">${todayFocus === 'Rest day' ? '—' : todayFocusNote || '—'}</div>
+    </div>
+    <div style="font-family:var(--font-display);font-size:16px;margin-top:4px;">${todayFocus}</div>
+    ${todayKm > 0 ? `<div class="divider"></div><div style="font-family:var(--font-mono);font-size:12px;color:var(--teal);">✓ Logged ${todayKm.toFixed(1)} km today</div>` : ''}
+  </div>`;
+
+  // Week progress
+  html += `<div class="card">
+    <div class="eyebrow">This week</div>
+    <div class="row">
+      <div class="big-number">${Math.round(weekKm)}</div>
+      <span class="unit">/ ${weekTarget > 0 ? weekTarget : '—'} km</span>
+    </div>
+    ${weekTarget > 0 ? `<div class="progress-wrap"><div class="progress-bar ${pct >= 1 ? 'over' : ''}" style="width:${Math.round(pct * 100)}%"></div></div>
+    <div class="note">${Math.round(pct * 100)}% of weekly target</div>` : '<div class="note">No plan set for this week</div>'}
+  </div>`;
+
+  // Metrics
+  html += `<div class="metrics">
+    <div class="metric-card">
+      <div class="metric-label">Year to date</div>
+      <div class="metric-value">${Math.round(yearKm)}<span class="metric-unit"> km</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">All time</div>
+      <div class="metric-value">${Math.round(allKm / 1000).toLocaleString()}<span class="metric-unit"> kkm</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Weight</div>
+      <div class="metric-value">${latestWeight ? latestWeight.toFixed(1) : '—'}<span class="metric-unit"> kg</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Body fat</div>
+      <div class="metric-value">${latestFat != null ? latestFat.toFixed(1) : '—'}<span class="metric-unit"> %</span></div>
+    </div>
+  </div>`;
+
+  // Next event
+  if (nextEvent) {
+    const daysTo = daysBetween(today, nextEvent.date);
+    html += `<div class="card event-card">
+      <div class="eyebrow">Next event</div>
+      <div class="event-name">${nextEvent.name || 'Event'}</div>
+      <div class="event-meta">${fmtDate(nextEvent.date)}${nextEvent.km ? ` · ${nextEvent.km}km` : ''}${nextEvent.loc ? ` · ${nextEvent.loc}` : ''}</div>
+      <div class="countdown">${daysTo === 0 ? 'Today!' : daysTo === 1 ? 'Tomorrow' : `${daysTo} days`}</div>
+    </div>`;
+  }
+
+  document.getElementById('home-content').innerHTML = html;
+}
+
+// ── Render: Plan ─────────────────────────────────────────────────
+function renderPlan() {
+  const today = todayISO();
+  const ws = weekStartISO(today);
+  const planRows = (appData.planRows || []).sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+  const entries = appData.entries || [];
+
+  // Show current week + next 7 weeks
+  const weeks = [];
+  for (let i = -1; i <= 8; i++) {
+    const weekStart = addDays(ws, i * 7);
+    weeks.push(weekStart);
+  }
+
+  let html = '';
+  for (const weekStart of weeks) {
+    const row = planRows.find(r => r.weekStart === weekStart);
+    const isCurrent = weekStart === ws;
+    const isPast = weekStart < ws;
+    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)); // Mon–Sun
+    const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+    // Actual km per day
+    const actualKm = days.map(d => (entries.find(e => e.date === d)?.distanceKm || 0));
+    const weekActual = actualKm.reduce((s, k) => s + k, 0);
+    const weekTarget = row ? (Number(row.targetVol) || 0) : 0;
+    const longRide = row ? (Number(row.targetLong) || 0) : 0;
+    const satKm = row ? (Number(row.targetSat) || 0) : 0;
+
+    // Simple day targets for bar chart
+    const zwiftKm = weekTarget > 0 ? Math.round((weekTarget - satKm - longRide) / 4) : 0;
+    const dayTargets = [0, zwiftKm, 0, zwiftKm, 0, satKm, longRide]; // Mon..Sun
+    const maxBar = Math.max(...dayTargets, ...actualKm, 1);
+
+    const weekLabel = new Date(weekStart + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+    html += `<div class="card plan-week">
+      <div class="plan-week-header ${isCurrent ? 'current' : ''}">
+        <span>${isCurrent ? '▶ ' : ''}w/c ${weekLabel}</span>
+        <span class="plan-week-total">${weekTarget > 0 ? weekTarget + ' km' : isPast ? Math.round(weekActual) + ' km' : '—'}</span>
+      </div>
+      ${row?.audax ? `<div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:8px;">${row.audax}</div>` : ''}
+      <div class="plan-bars">
+        ${days.map((d, i) => {
+          const target = dayTargets[i];
+          const actual = actualKm[i];
+          const isToday = d === today;
+          const barH = actual > 0 ? Math.round((actual / maxBar) * 40) : (target > 0 ? Math.round((target / maxBar) * 40) : 4);
+          return `<div class="plan-day-bar ${actual > 0 ? 'has-ride' : ''} ${isToday ? 'today' : ''}" style="height:${barH}px;" title="${dayLabels[i]}: ${actual > 0 ? actual.toFixed(1) + 'km actual' : target > 0 ? target + 'km target' : 'rest'}"></div>`;
+        }).join('')}
+      </div>
+      <div class="plan-day-labels">${dayLabels.map(l => `<div class="plan-day-label">${l}</div>`).join('')}</div>
+      <div class="plan-day-labels">${actualKm.map(k => `<div class="plan-day-km">${k > 0 ? Math.round(k) : ''}</div>`).join('')}</div>
+    </div>`;
+  }
+
+  document.getElementById('plan-content').innerHTML = html || '<p class="note">No plan data found.</p>';
+}
+
+// ── Log helpers ───────────────────────────────────────────────────
+function upsertEntry(date, patch) {
+  const entries = appData.entries || [];
+  const idx = entries.findIndex(e => e.date === date);
+  if (idx !== -1) Object.assign(entries[idx], patch);
+  else entries.push({ date, distanceKm: null, weightKg: null, ...patch });
+  entries.sort((a, b) => a.date.localeCompare(b.date));
+  appData.entries = entries;
+}
+
+// ── Tab navigation ────────────────────────────────────────────────
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const panel = btn.dataset.panel;
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + panel).classList.add('active');
+    if (panel === 'home' && appData) renderHome();
+    if (panel === 'plan' && appData) renderPlan();
+  });
+});
+
+// ── Sign out ──────────────────────────────────────────────────────
+document.getElementById('signout-btn').addEventListener('click', async () => {
+  const accounts = msalApp.getAllAccounts();
+  if (accounts.length) await msalApp.logoutRedirect({ account: accounts[0] });
+});
+
+// ── Log ride ──────────────────────────────────────────────────────
+document.getElementById('log-ride-btn').addEventListener('click', async () => {
+  const date = document.getElementById('log-date').value;
+  const km = parseFloat(document.getElementById('log-km').value);
+  const notes = document.getElementById('log-notes').value.trim();
+  const status = document.getElementById('log-ride-status');
+  if (!date) { status.textContent = 'Please select a date'; status.style.color = 'var(--red)'; return; }
+  if (isNaN(km) || km < 0) { status.textContent = 'Please enter a valid distance'; status.style.color = 'var(--red)'; return; }
+  upsertEntry(date, { distanceKm: km, ...(notes && { notes }) });
+  schedSave();
+  status.textContent = `Saved — ${km.toFixed(1)} km on ${fmtDate(date)}`;
+  status.style.color = 'var(--teal)';
+  document.getElementById('log-km').value = '';
+  document.getElementById('log-notes').value = '';
+  if (appData) renderHome();
+});
+
+// ── Log weight ────────────────────────────────────────────────────
+document.getElementById('log-weight-btn').addEventListener('click', async () => {
+  const date = document.getElementById('weight-date').value;
+  const kg = parseFloat(document.getElementById('weight-kg').value);
+  const status = document.getElementById('log-weight-status');
+  if (!date) { status.textContent = 'Please select a date'; status.style.color = 'var(--red)'; return; }
+  if (isNaN(kg) || kg < 0) { status.textContent = 'Please enter a valid weight'; status.style.color = 'var(--red)'; return; }
+  upsertEntry(date, { weightKg: kg });
+  schedSave();
+  status.textContent = `Saved — ${kg.toFixed(1)} kg on ${fmtDate(date)}`;
+  status.style.color = 'var(--teal)';
+  document.getElementById('weight-kg').value = '';
+  if (appData) renderHome();
+});
+
+// ── Sign in ────────────────────────────────────────────────────────
+document.getElementById('signin-btn').addEventListener('click', () => {
+  msalApp.loginRedirect({ scopes: SCOPES });
+});
+
+// ── Init ───────────────────────────────────────────────────────────
+async function init() {
+  await msalApp.initialize();
+
+  let redirectResult = null;
+  try { redirectResult = await msalApp.handleRedirectPromise(); } catch (e) {
+    document.getElementById('signin-error').textContent = e.message;
+  }
+
+  const accounts = msalApp.getAllAccounts();
+  const isAuthed = redirectResult || accounts.length > 0;
+
+  document.getElementById('loading').style.display = 'none';
+
+  if (!isAuthed) {
+    document.getElementById('signin').style.display = 'flex';
+    return;
+  }
+
+  // Set today's date in log forms
+  const today = todayISO();
+  document.getElementById('log-date').value = today;
+  document.getElementById('weight-date').value = today;
+
+  document.getElementById('app').classList.add('visible');
+  setSyncStatus('Loading…');
+
+  // Load data from OneDrive
+  const cached = localStorage.getItem('myride_data');
+  if (cached) {
+    try { appData = JSON.parse(cached); renderHome(); } catch {}
+  }
+
+  const fresh = await loadFromOneDrive();
+  if (fresh) {
+    appData = fresh;
+    localStorage.setItem('myride_data', JSON.stringify(fresh));
+    renderHome();
+    const t = fresh._syncedAt ? new Date(fresh._syncedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '?';
+    setSyncStatus(`☁ ${t}`);
+  } else if (!cached) {
+    setSyncStatus('No data found');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
